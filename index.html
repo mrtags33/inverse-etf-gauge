@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inverse ETF Gauge</title>
+<meta name="description" content="Daily share of leveraged and inverse ETF dollar volume going into inverse funds, with 1, 3, 5 and 7-day readings.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;700&family=IBM+Plex+Sans:wght@400;500&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<style>
+:root{
+  --paper:#E9EEF2; --card:#F7F9FB; --ink:#16232F; --muted:#5B6B7A; --rule:#C9D3DC;
+  --bear:#A8324A; --bull:#1E7469; --line:#2F4A63; --hi:#DCE5EC;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --paper:#0F1820; --card:#16212B; --ink:#E3EAF0; --muted:#8FA0AF; --rule:#2A3946;
+  --bear:#E0637A; --bull:#4FB3A3; --line:#9DB6CC; --hi:#1D2B37; }}
+:root[data-theme="dark"]{
+  --paper:#0F1820; --card:#16212B; --ink:#E3EAF0; --muted:#8FA0AF; --rule:#2A3946;
+  --bear:#E0637A; --bull:#4FB3A3; --line:#9DB6CC; --hi:#1D2B37; }
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:15px/1.55 "IBM Plex Sans",system-ui,sans-serif}
+main{max-width:1080px;margin:0 auto;padding:36px 16px 64px}
+h1,h2{font-family:"Archivo Narrow",sans-serif;margin:0;letter-spacing:.01em}
+h1{font-size:clamp(30px,5vw,46px);font-weight:700;line-height:1.05}
+h2{font-size:22px;font-weight:700}
+.eyebrow{font:500 12px "IBM Plex Mono",monospace;text-transform:uppercase;letter-spacing:.12em;color:var(--muted)}
+.lede{color:var(--muted);max-width:64ch;margin:10px 0 0}
+section{margin-top:32px}
+.card{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:20px}
+.head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.mono{font-family:"IBM Plex Mono",monospace}
+.pos{color:var(--bull)} .neg{color:var(--bear)}
+
+/* signature: the ladder of four readings on one shared scale */
+.ladder{display:grid;gap:4px}
+.rung{display:grid;grid-template-columns:64px 180px 1fr 92px;align-items:center;gap:16px;padding:12px 10px;border-radius:8px}
+.rung.focus{background:var(--hi)}
+.rung .win{font:500 13px "IBM Plex Mono",monospace;color:var(--muted)}
+.rung .val{font:700 40px/1 "Archivo Narrow",sans-serif}
+.rung .chg{font:12px "IBM Plex Mono",monospace;margin-top:4px}
+.rung .pct{font:12px "IBM Plex Mono",monospace;color:var(--muted);text-align:right}
+.rung .pct b{display:block;font:700 22px "Archivo Narrow",sans-serif;color:var(--ink)}
+.bar{position:relative;height:22px;border-radius:4px;background:linear-gradient(90deg,
+  color-mix(in srgb,var(--bull) 55%,var(--card)) 0%, color-mix(in srgb,var(--bull) 12%,var(--card)) 32%,
+  color-mix(in srgb,var(--bear) 12%,var(--card)) 55%, color-mix(in srgb,var(--bear) 60%,var(--card)) 100%)}
+.bar .lvl{position:absolute;top:-3px;bottom:-3px;width:1px;background:var(--ink);opacity:.4}
+.bar .dot{position:absolute;top:50%;width:14px;height:14px;margin:-7px 0 0 -7px;border-radius:50%;
+  background:var(--ink);border:2px solid var(--card)}
+.scale{display:grid;grid-template-columns:64px 180px 1fr 92px;gap:16px;padding:0 10px}
+.scale .ticks{position:relative;height:34px;font:11px/1.25 "IBM Plex Mono",monospace;color:var(--muted)}
+.scale .ticks span{position:absolute;transform:translateX(-50%);text-align:center;white-space:nowrap}
+.verdict{margin:16px 10px 0;max-width:72ch}
+
+.controls{display:flex;gap:16px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+.seg button{font:500 13px "IBM Plex Mono",monospace;background:transparent;color:var(--muted);border:0;padding:6px 12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--card)}
+.seg button:focus-visible{outline:2px solid var(--bear);outline-offset:-2px}
+#chart{height:540px}
+table{width:100%;border-collapse:collapse;font:13.5px "IBM Plex Mono",monospace}
+th,td{padding:7px 10px;text-align:right;border-bottom:1px solid var(--rule);white-space:nowrap}
+th:first-child,td:first-child{text-align:left}
+thead th{font-weight:500;color:var(--muted);font-size:11.5px;text-transform:uppercase;letter-spacing:.06em}
+td.z40{background:color-mix(in srgb,var(--bear) 14%,transparent)}
+td.z50{background:color-mix(in srgb,var(--bear) 30%,transparent)}
+td.z20{background:color-mix(in srgb,var(--bull) 22%,transparent)}
+.scroll{overflow-x:auto}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.note{color:var(--muted);font-size:13px;margin:10px 0 0}
+code{font:13px "IBM Plex Mono",monospace}
+.err{border-color:var(--bear)}
+@media (max-width:760px){
+  .rung,.scale{grid-template-columns:44px 1fr 64px;gap:10px}
+  .rung .bar{grid-column:1/-1;grid-row:2}
+  .scale{display:none}
+  .grid2{grid-template-columns:1fr} #chart{height:440px}
+}
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">Speculative positioning · data through <span id="asof">…</span></div>
+  <h1>How much of the leveraged-ETF money is betting on a fall?</h1>
+  <p class="lede">Inverse ETFs' share of leveraged-plus-inverse ETF dollar volume. A high share means traders are paying for downside bets in a hurry, which has tended to happen near bottoms. Warren Pies has cited about 40% for a tactical low, 50% before calling a bottom in a sharp sell-off, and 60% at major bottoms.</p>
+
+  <div id="error" class="card err" hidden style="margin-top:24px"></div>
+
+  <section>
+    <div class="card">
+      <div class="head"><h2>Current readings</h2><span class="eyebrow">Percentile vs trailing 3 years</span></div>
+      <div class="ladder" id="ladder"></div>
+      <div class="scale"><span></span><span></span>
+        <div class="ticks" id="ticks"></div><span></span></div>
+      <p class="verdict" id="verdict"></p>
+    </div>
+  </section>
+
+  <section>
+    <div class="card">
+      <div class="head"><h2>History</h2>
+        <div class="controls">
+          <div class="seg" role="group" aria-label="Averaging window" id="segWin"></div>
+          <div class="seg" role="group" aria-label="Date range" id="segRange"></div>
+        </div></div>
+      <div id="chart"></div>
+      <p class="note">Dotted lines mark 20% (euphoria), 40%, 50% and 60% (Pies's bottom levels).</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="card scroll">
+      <div class="head"><h2>Last 14 trading days</h2><span class="eyebrow">Inverse share, percentile in brackets</span></div>
+      <table id="recent"><thead><tr><th>Date</th><th>Inverse $bn</th><th>Leveraged $bn</th>
+        <th>1-day</th><th>3-day</th><th>5-day</th><th>7-day</th><th>S&amp;P 500</th></tr></thead><tbody></tbody></table>
+      <p class="note">Shaded cells are at or above 40% (light) or 50% (dark), or at or below 20% (green).</p>
+    </div>
+  </section>
+
+  <section class="grid2">
+    <div class="card"><h2>How it's calculated</h2>
+      <p>Dollar volume is each fund's closing price × shares traded. The N-day reading adds up N trading days of inverse and leveraged dollar volume before dividing, so heavy days count for more. Percentiles rank each reading against the same window's previous 756 trading days (about 3 years).</p>
+      <p class="note">Updates every weekday evening from Yahoo Finance data. Pies's exact fund list and window aren't public; his April 2025 reading of 43% best matches the 5-day reading here, so that row is highlighted.</p></div>
+    <div class="card"><h2>Funds included</h2>
+      <p><span class="eyebrow" style="color:var(--bear)">Inverse</span><br><code id="inv"></code></p>
+      <p><span class="eyebrow" style="color:var(--bull)">Leveraged long</span><br><code id="lev"></code></p>
+      <p class="note" id="updated"></p></div>
+  </section>
+</main>
+<script>
+const WINDOWS = [1,3,5,7], FOCUS = 5, RANK = 756, SCALE_MAX = 0.70;
+const LEVELS = [{v:.20,t:"20%",s:"euphoria"},{v:.40,t:"40%",s:"tactical"},{v:.50,t:"50%",s:"bottom call"},{v:.60,t:"60%",s:"major"}];
+const RANGES = [["1Y",252],["3Y",756],["5Y",1260],["All",Infinity]];
+const $ = id => document.getElementById(id);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const fp = (v,d=1) => v==null||isNaN(v) ? "–" : (v*100).toFixed(d)+"%";
+const ord = n => n + (["th","st","nd","rd"][(n%100-20)%10] || ["th","st","nd","rd"][n%100] || "th");
+let D, S = {}, state = {win: FOCUS, range: "3Y"};
+
+function rolling(inv, lev, n){
+  const out = new Array(inv.length).fill(null); let a=0,b=0;
+  for (let i=0;i<inv.length;i++){
+    a+=inv[i]; b+=lev[i];
+    if (i>=n){ a-=inv[i-n]; b-=lev[i-n]; }
+    if (i>=n-1) out[i] = a/(a+b);
+  }
+  return out;
+}
+function pctile(x){
+  const out = new Array(x.length).fill(null);
+  for (let i=0;i<x.length;i++){
+    if (x[i]==null) continue;
+    const lo = Math.max(0,i-RANK+1); let c=0,m=0;
+    for (let j=lo;j<=i;j++){ if (x[j]==null) continue; m++; if (x[j]<=x[i]) c++; }
+    if (m>=252) out[i]=c/m;
+  }
+  return out;
+}
+
+function renderLadder(){
+  const L = D.date.length-1;
+  $("ladder").innerHTML = WINDOWS.map(w => {
+    const v=S[w].r[L], prev=S[w].r[L-1], p=S[w].p[L], d=v-prev;
+    return `<div class="rung${w===FOCUS?' focus':''}">
+      <div class="win">${w}-day${w===FOCUS?'<br><span style="font-size:11px">≈ Pies</span>':''}</div>
+      <div><div class="val">${fp(v)}</div>
+        <div class="chg ${d>=0?'neg':'pos'}">${d>=0?'▲':'▼'} ${Math.abs(d*100).toFixed(1)} pts vs prior day</div></div>
+      <div class="bar" role="img" aria-label="${w}-day reading ${fp(v)}">
+        ${LEVELS.map(l=>`<div class="lvl" style="left:${l.v/SCALE_MAX*100}%"></div>`).join("")}
+        <div class="dot" style="left:${Math.min(v,SCALE_MAX)/SCALE_MAX*100}%"></div></div>
+      <div class="pct"><b>${p==null?'–':ord(Math.round(p*100))}</b>pctile</div></div>`;
+  }).join("");
+  $("ticks").innerHTML = `<span style="left:0;transform:none">0%</span>` +
+    LEVELS.map(l=>`<span style="left:${l.v/SCALE_MAX*100}%">${l.t}<br>${l.s}</span>`).join("");
+
+  const v = S[FOCUS].r[L];
+  $("verdict").innerHTML = "<b>5-day reading: </b>" + (
+    v>=.60 ? "major-bottom territory. Readings this high have come only at the deepest sell-offs (June and October 2022)."
+  : v>=.50 ? "at the level Pies wants before calling a bottom. Traders are paying heavily for downside bets."
+  : v>=.40 ? "in tactical-bottom territory. Fear is high, but below the 50% level Pies waits for in a sharp sell-off."
+  : v<=.20 ? "euphoric. Almost everyone in leveraged ETFs is betting on a rise, as at the 2021 top."
+  : "no wash-out. Downside betting is " + (v>=.33 ? "above average but well short of 40%." : "subdued."));
+}
+
+function renderTable(){
+  const L = D.date.length-1, rows=[];
+  for (let i=L;i>L-14 && i>=0;i--){
+    const cells = WINDOWS.map(w=>{const v=S[w].r[i],p=S[w].p[i];
+      const z = v>=.5?'z50':v>=.4?'z40':v<=.2?'z20':'';
+      return `<td class="${z}">${fp(v)} <span style="color:var(--muted)">(${p==null?'–':Math.round(p*100)})</span></td>`}).join("");
+    const dt = new Date(D.date[i]+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"});
+    rows.push(`<tr><td>${dt}</td><td>${(D.inv[i]/1000).toFixed(1)}</td><td>${(D.lev[i]/1000).toFixed(1)}</td>${cells}<td>${D.spx[i].toLocaleString("en-US",{maximumFractionDigits:0})}</td></tr>`);
+  }
+  document.querySelector("#recent tbody").innerHTML = rows.join("");
+}
+
+function seg(el, items, key){
+  el.innerHTML = items.map(([label,val])=>`<button type="button" data-v="${val}" aria-pressed="${state[key]==val}">${label}</button>`).join("");
+  el.onclick = e => { const b=e.target.closest("button"); if(!b) return;
+    state[key] = key==="win" ? +b.dataset.v : b.dataset.v;
+    el.querySelectorAll("button").forEach(x=>x.setAttribute("aria-pressed", x===b)); drawChart(); };
+}
+
+function drawChart(){
+  const n = RANGES.find(r=>r[0]===state.range)[1], L=D.date.length, s=Math.max(0, L-n);
+  const x = D.date.slice(s), r = S[state.win].r.slice(s).map(v=>v==null?null:v*100);
+  const rule=css("--rule"), mute=css("--muted"), bear=css("--bear"), bull=css("--bull");
+  const lv = LEVELS.map(l=>({type:"line",xref:"paper",x0:0,x1:1,yref:"y2",y0:l.v*100,y1:l.v*100,
+    line:{color:l.v<=.2?bull:bear,width:1,dash:"dot"}}));
+  Plotly.react("chart",[
+    {x, y:D.spx.slice(s), name:"S&P 500", line:{color:css("--line"),width:1.4}, yaxis:"y", hovertemplate:"%{y:,.0f}<extra>S&P 500</extra>"},
+    {x, y:r, name:`${state.win}-day inverse share`, line:{color:bear,width:1.2}, yaxis:"y2", hovertemplate:"%{y:.1f}%<extra>"+state.win+"-day</extra>"},
+  ],{
+    margin:{l:64,r:16,t:8,b:36}, paper_bgcolor:"rgba(0,0,0,0)", plot_bgcolor:"rgba(0,0,0,0)",
+    font:{family:"IBM Plex Mono, monospace",size:11,color:mute}, hovermode:"x unified",
+    legend:{orientation:"h",y:1.07,x:0},
+    yaxis:{domain:[0.45,1],type:"log",gridcolor:rule,title:{text:"S&P 500"}},
+    yaxis2:{domain:[0,0.38],gridcolor:rule,ticksuffix:"%",tickvals:[20,40,50,60],range:[0,Math.max(70,Math.ceil(Math.max(...r.filter(v=>v!=null))/10)*10)],title:{text:"inverse"}},
+    xaxis:{gridcolor:rule,anchor:"y2"}, shapes:lv,
+  },{displayModeBar:false,responsive:true});
+}
+
+async function init(){
+  try {
+    const res = await fetch("data.json", {cache:"no-store"});
+    if (!res.ok) throw new Error(`data.json returned ${res.status}`);
+    D = await res.json();
+  } catch(e){
+    $("error").hidden=false;
+    $("error").innerHTML = `<h2>The data didn't load</h2><p>${e.message}. Open this page through a web server (the published site, or <code>python3 -m http.server</code> in this folder), not as a file.</p>`;
+    return;
+  }
+  WINDOWS.forEach(w=>{ const r=rolling(D.inv,D.lev,w); S[w]={r, p:pctile(r)}; });
+  const last = D.date[D.date.length-1];
+  $("asof").textContent = new Date(last+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"});
+  $("updated").textContent = "Last refreshed " + new Date(D.updated).toLocaleString("en-US",{dateStyle:"medium",timeStyle:"short"}) +
+    (D.missing_recent.length ? `. No recent volume for: ${D.missing_recent.join(", ")}.` : ".");
+  $("inv").textContent = D.inverse.join(" "); $("lev").textContent = D.leveraged.join(" ");
+  renderLadder(); renderTable();
+  seg($("segWin"), WINDOWS.map(w=>[w+"d",w]), "win");
+  seg($("segRange"), RANGES.map(r=>[r[0],r[0]]), "range");
+  drawChart();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawChart);
+}
+init();
+</script>
+</body>
+</html>
