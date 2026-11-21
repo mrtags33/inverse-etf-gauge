@@ -9,6 +9,7 @@ Run: python fetch_data.py
 """
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,15 +22,44 @@ LEVERAGED = ["SSO", "UPRO", "SPXL", "QLD", "TQQQ", "DDM", "UDOW", "UWM",
              "TNA", "URTY", "SOXL", "FAS"]
 START = "2010-01-01"
 OUT = Path(__file__).parent / "data.json"
+RETRIES = 3
+
+
+def dollar_volume(tickers: list[str]) -> pd.DataFrame:
+    """Daily close x volume per ticker. Parallel downloads sometimes drop a ticker
+    (yfinance's cache reports 'database is locked'), so any ticker with no recent
+    data is retried one at a time, without threads."""
+    etf = yf.download(tickers, start=START, auto_adjust=False, progress=False, threads=True)
+    dv = (etf["Close"] * etf["Volume"]).reindex(columns=tickers)
+    for attempt in range(1, RETRIES + 1):
+        missing = [t for t in tickers if dv[t].iloc[-30:].fillna(0).sum() == 0]
+        if not missing:
+            break
+        print(f"retry {attempt}/{RETRIES}: {missing}", file=sys.stderr)
+        time.sleep(3 * attempt)
+        for t in missing:
+            one = yf.download(t, start=START, auto_adjust=False, progress=False, threads=False)
+            if one.empty:
+                continue
+            col = (one["Close"] * one["Volume"]).squeeze()
+            dv = dv.reindex(dv.index.union(col.index))
+            dv[t] = col
+    return dv
 
 
 def main() -> int:
-    etf = yf.download(INVERSE + LEVERAGED, start=START, auto_adjust=False,
-                      progress=False, threads=True)
+    dv = dollar_volume(INVERSE + LEVERAGED)
     spx = yf.download("^GSPC", start=START, auto_adjust=True, progress=False)["Close"].squeeze()
 
-    dv = (etf["Close"] * etf["Volume"]).fillna(0.0)
-    missing = [t for t in INVERSE + LEVERAGED if t not in dv or dv[t].iloc[-30:].sum() == 0]
+    # A missing fund skews the share badly (no SOXL took it from ~40% to ~60%), so
+    # publish nothing rather than a partial basket. Checks the last 30 days and the latest day.
+    missing = [t for t in INVERSE + LEVERAGED
+               if dv[t].iloc[-30:].fillna(0).sum() == 0 or pd.isna(dv[t].iloc[-1]) or dv[t].iloc[-1] == 0]
+    if missing:
+        print(f"no data for {missing} after {RETRIES} retries; keeping the existing data.json",
+              file=sys.stderr)
+        return 1
+    dv = dv.fillna(0.0)
     inv = dv[[t for t in INVERSE if t in dv]].sum(axis=1)
     lev = dv[[t for t in LEVERAGED if t in dv]].sum(axis=1)
 
